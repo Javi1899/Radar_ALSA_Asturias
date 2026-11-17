@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Radar ALSA Asturias</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#070b14;--pn:#0e1626;--ln:#1d2c47;--tx:#d7e3f7;--mu:#7f93b3;--ac:#19e3c1;--wr:#ffb020;--rd:#ff5470}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:14px/1.4 system-ui,Segoe UI,sans-serif}
+#app{display:grid;grid-template-columns:390px 1fr;grid-template-rows:auto 1fr;height:100%}
+header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--pn);border-bottom:1px solid var(--ln)}
+header h1{margin:0;font-size:17px;letter-spacing:.14em;color:var(--ac)}
+header .sub{color:var(--mu);font-size:12px}
+.warn{margin-left:auto;background:#3a2a05;border:1px solid var(--wr);color:var(--wr);padding:5px 10px;border-radius:6px;font-size:12px;max-width:620px}
+aside{background:var(--pn);border-right:1px solid var(--ln);display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;border-bottom:1px solid var(--ln)}
+.tabs button{flex:1;background:none;border:0;color:var(--mu);padding:10px;cursor:pointer;font-weight:600}
+.tabs button.on{color:var(--ac);border-bottom:2px solid var(--ac)}
+.pane{display:none;padding:12px;overflow:auto;min-height:0;flex:1}
+.pane.on{display:block}
+#map{height:100%;min-height:300px;background:#0a1220}
+label{display:block;color:var(--mu);font-size:12px;margin:8px 0 3px}
+input[type=text],input[type=password],input[type=search],select{width:100%;background:#0a1220;border:1px solid var(--ln);color:var(--tx);padding:7px 9px;border-radius:6px}
+button.btn{background:#12304a;border:1px solid var(--ac);color:var(--ac);padding:7px 11px;border-radius:6px;cursor:pointer;margin:4px 4px 0 0}
+button.btn:hover{background:#17405f}
+button.btn.sm{padding:2px 8px;font-size:12px;margin:0}
+.box{border:1px solid var(--ln);border-radius:8px;padding:10px;margin-bottom:12px;background:#0b1322}
+.stat{display:flex;gap:10px;margin-bottom:10px}
+.stat div{flex:1;background:#0b1322;border:1px solid var(--ln);border-radius:8px;padding:8px;text-align:center}
+.stat b{display:block;font-size:22px;color:var(--ac)}
+.stat span{font-size:11px;color:var(--mu)}
+.row{display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--ln);cursor:pointer}
+.row:hover{background:#101c31}
+.chip{min-width:44px;text-align:center;padding:2px 6px;border-radius:5px;color:#031018;font-weight:700;font-size:12px}
+.row .t{flex:1;min-width:0}
+.row .t div:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .t small{color:var(--mu)}
+.log{font:12px/1.5 Consolas,monospace;color:var(--mu);white-space:pre-wrap;max-height:150px;overflow:auto}
+.err{color:var(--rd)}
+.bus{background:none;border:0}
+.bus .b{border:2px dashed #fff;border-radius:6px;color:#031018;font-weight:800;font-size:11px;text-align:center;line-height:18px;padding:0 4px;box-shadow:0 0 8px #000a;white-space:nowrap}
+.leaflet-popup-content{font:13px/1.4 system-ui,sans-serif;margin:10px 12px}
+.pp h3{margin:0 0 4px;font-size:15px}
+.pp .est{background:#fff3d6;color:#7a4b00;border-radius:4px;padding:2px 6px;font-size:11px;display:inline-block;margin-bottom:5px}
+.pp table{border-collapse:collapse;width:100%}
+.pp td{padding:2px 0;vertical-align:top}
+.pp td:first-child{color:#667;padding-right:8px;white-space:nowrap}
+.bar{height:6px;background:#dde;border-radius:3px;margin-top:6px}
+.bar i{display:block;height:100%;background:#19a58f;border-radius:3px}
+table.dep{width:100%;border-collapse:collapse}
+table.dep td{padding:5px 3px;border-bottom:1px solid var(--ln)}
+.foot{color:var(--mu);font-size:11px;margin-top:10px}
+a{color:var(--ac)}
+@media(max-width:820px){#app{grid-template-columns:1fr;grid-template-rows:auto 45vh 1fr}header{flex-wrap:wrap}.warn{margin-left:0}aside{order:3;border-right:0}#map{order:2}}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <h1>RADAR ALSA · ASTURIAS</h1><span class="sub">Web de Javi: _TJ</span>
+  <div class="warn">⚠ Posiciones ESTIMADAS a partir del horario oficial (GTFS del NAP). No es GPS real, no incluye retrasos, desvíos ni incidencias.</div>
+</header>
+<aside>
+  <div class="tabs">
+    <button data-t="bus" class="on">Autobuses</button>
+    <button data-t="par">Paradas</button>
+    <button data-t="dat">Datos</button>
+  </div>
+  <div class="pane on" id="p-bus">
+    <div class="stat"><div><b id="sN">–</b><span>en servicio (Asturias)</span></div><div><b id="sL">–</b><span>líneas</span></div><div><b id="sT">–</b><span>actualizado</span></div></div>
+    <input type="search" id="fq" placeholder="Filtrar por línea, destino o parada…">
+    <label><input type="checkbox" id="fOth"> Incluir otros operadores del Consorcio (no ALSA)</label>
+    <div id="list" style="margin-top:8px"></div>
+  </div>
+  <div class="pane" id="p-par">
+    <label>Parada (escribe el nombre)</label>
+    <input type="text" id="sq" list="sl" placeholder="Ej.: Estación de Autobuses Oviedo">
+    <datalist id="sl"></datalist>
+    <div id="dep" style="margin-top:10px"></div>
+  </div>
+  <div class="pane" id="p-dat">
+    <div class="box">
+      <b>1. Cargar horarios oficiales</b>
+      <div class="foot">Fuente: Punto de Acceso Nacional de Transporte (MITMA). Ficheros <b>1133</b> (ALSA) y <b>1178</b> (Consorcio de Transportes de Asturias). Necesitas una cuenta gratuita en
+      <a href="https://nap.transportes.gob.es" target="_blank" rel="noopener">nap.transportes.gob.es</a> para obtener tu clave API.</div>
+      <label>Clave API del NAP</label>
+      <input type="password" id="key" autocomplete="off">
+      <label><input type="checkbox" id="rem"> Recordar la clave en este navegador</label>
+      <button class="btn" data-dl="1133">Descargar ALSA (1133)</button>
+      <button class="btn" data-dl="1178">Descargar Consorcio (1178)</button>
+      <div class="foot">Si el navegador bloquea la descarga directa (CORS), descarga el ZIP desde el NAP y cárgalo aquí:</div>
+      <input type="file" id="zip" accept=".zip" multiple>
+    </div>
+    <div class="box"><b>2. Datos cargados</b><div id="ds" style="margin-top:6px"></div></div>
+    <div class="log" id="log"></div>
+    <div class="foot">Los datos se procesan y guardan solo en tu navegador. Solo se conservan los viajes que pasan por Asturias. La posición se interpola entre paradas (siguiendo el trazado si el GTFS incluye shapes; en línea recta si no). Recarga los horarios cada pocas semanas.</div>
+  </div>
+</aside>
+<div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script id="core">
+/*CORE*/
+const BBOX={minLat:42.85,maxLat:43.75,minLon:-7.35,maxLon:-4.45};
+const inAst=(la,lo)=>la>=BBOX.minLat&&la<=BBOX.maxLat&&lo>=BBOX.minLon&&lo<=BBOX.maxLon;
+function splitCSV(l){
+  if(l.indexOf('"')<0) return l.split(',');
+  const o=[];let c='',q=false;
+  for(let i=0;i<l.length;i++){const ch=l[i];
+    if(q){ if(ch==='"'){ if(l[i+1]==='"'){c+='"';i++;} else q=false; } else c+=ch; }
+    else if(ch==='"') q=true; else if(ch===','){o.push(c);c='';} else c+=ch; }
+  o.push(c);return o;
+}
+function rowHandler(cb){
+  let idx=null;
+  return line=>{ if(!line) return;
+    if(!idx){ idx={}; splitCSV(line.replace(/^\uFEFF/,'')).forEach((n,i)=>idx[n.trim()]=i); return; }
+    cb(splitCSV(line),idx); };
+}
+function tsec(s){ if(!s) return null; const p=s.trim().split(':'); if(p.length<2||p[0]==='') return null; return (+p[0])*3600+(+p[1])*60+(+(p[2]||0)); }
+function fmt(sec){ sec=((sec%86400)+86400)%86400; const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60); return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); }
+function hav(a,b,c,d){ const R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r*Math.cos((a+c)/2*r); return R*Math.sqrt(x*x+y*y); }
+
+async function streamFile(u8,name,onLine,yieldFn){
+  let found=false,done;const p=new Promise(r=>done=r);
+  const un=new fflate.Unzip();un.register(fflate.UnzipInflate);
+  un.onfile=f=>{
+    if(f.name.split('/').pop()!==name) return;
+    found=true;const dec=new TextDecoder('utf-8');let rest='';
+    f.ondata=(err,chunk,final)=>{
+      if(err){done(false);return;}
+      rest+=dec.decode(chunk,{stream:!final});
+      const lines=rest.split('\n');rest=lines.pop();
+      for(const l of lines) onLine(l.endsWith('\r')?l.slice(0,-1):l);
+      if(final){ if(rest) onLine(rest.endsWith('\r')?rest.slice(0,-1):rest); done(true); }
+    };
+    f.start();
+  };
+  const CH=1<<20;
+  for(let o=0;o<u8.length;o+=CH){
+    const last=o+CH>=u8.length;
+    un.push(u8.subarray(o,Math.min(o+CH,u8.length)),last);
+    if(yieldFn) await yieldFn(o/u8.length);
+  }
+  if(!found) return false;
+  return await p;
+}
+
+async function processGTFS(u8,label,progress,yieldFn){
+  progress=progress||(()=>{});
+  const dec=new TextDecoder('utf-8');
+  progress('Descomprimiendo tablas pequeñas…');
+  const small=fflate.unzipSync(u8,{filter:f=>/(^|\/)(stops|routes|trips|calendar|calendar_dates|agency)\.txt$/.test(f.name)});
+  const get=n=>{const k=Object.keys(small).find(x=>x.split('/').pop()===n+'.txt');return k?dec.decode(small[k]):'';};
+  const each=(txt,cb)=>{const h=rowHandler(cb);txt.split('\n').forEach(l=>h(l.replace(/\r$/,'')));};
+
+  const stopsAll={},ast=new Set();
+  each(get('stops'),(r,x)=>{const la=+r[x.stop_lat],lo=+r[x.stop_lon];if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0))return;
+    stopsAll[r[x.stop_id]]=[r[x.stop_name],la,lo];if(inAst(la,lo))ast.add(r[x.stop_id]);});
+  progress('Paradas: '+Object.keys(stopsAll).length+' ('+ast.size+' en Asturias)');
+  const agencies={};each(get('agency'),(r,x)=>{agencies[r[x.agency_id]||'']=r[x.agency_name];});
+  const defAg=Object.values(agencies)[0]||'';
+  const routes={};each(get('routes'),(r,x)=>{routes[r[x.route_id]]={s:(r[x.route_short_name]||'').trim()||(r[x.route_long_name]||'').trim(),l:r[x.route_long_name]||'',a:agencies[r[x.agency_id]||'']||defAg};});
+  const trips={};each(get('trips'),(r,x)=>{trips[r[x.trip_id]]={r:r[x.route_id],sv:r[x.service_id],h:r[x.trip_headsign]||'',sh:x.shape_id!==undefined?r[x.shape_id]:''};});
+  const svc={},ex={};
+  each(get('calendar'),(r,x)=>{svc[r[x.service_id]]={d:['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(k=>+r[x[k]]),s:+r[x.start_date],e:+r[x.end_date]};});
+  each(get('calendar_dates'),(r,x)=>{const s=r[x.service_id];(ex[s]=ex[s]||{})[+r[x.date]]=+r[x.exception_type];});
+  progress('Viajes: '+Object.keys(trips).length+' · Servicios: '+Object.keys(svc).length);
+
+  const keep=new Set();let n=0;
+  const okA=await streamFile(u8,'stop_times.txt',rowHandler((r,x)=>{
+    if(++n%2000000===0)progress('  paso 1/2 · '+(n/1e6)+' M filas');
+    if(ast.has(r[x.stop_id])&&trips[r[x.trip_id]])keep.add(r[x.trip_id]);}),yieldFn);
+  if(!okA)throw new Error('El ZIP no contiene stop_times.txt');
+  progress('Viajes que pasan por Asturias: '+keep.size);
+  const rows={};n=0;
+  await streamFile(u8,'stop_times.txt',rowHandler((r,x)=>{
+    if(++n%2000000===0)progress('  paso 2/2 · '+(n/1e6)+' M filas');
+    const t=r[x.trip_id];if(!keep.has(t))return;
+    (rows[t]=rows[t]||[]).push([+r[x.stop_sequence],r[x.stop_id],tsec(r[x.arrival_time]),tsec(r[x.departure_time])]);}),yieldFn);
+
+  const outTrips=[],usedStops={},shapeIds=new Set();
+  for(const t in rows){
+    const R=rows[t].sort((a,b)=>a[0]-b[0]);
+    if(R.length<2||R.some(q=>!stopsAll[q[1]]))continue;
+    R.forEach(q=>{if(q[2]==null)q[2]=q[3];if(q[3]==null)q[3]=q[2];});
+    // interpolar horas vacías por distancia entre paradas con hora
+    for(let i=0;i<R.length;i++){ if(R[i][2]!=null)continue;
+      let a=i-1;let b=i+1;while(b<R.length&&R[b][2]==null)b++;
+      if(a<0||b>=R.length)continue;
+      let tot=0,acc=0;for(let k=a;k<b;k++)tot+=hav(...stopsAll[R[k][1]].slice(1),...stopsAll[R[k+1][1]].slice(1));
+      for(let k=a;k<b;k++){ acc+=hav(...stopsAll[R[k][1]].slice(1),...stopsAll[R[k+1][1]].slice(1));
+        if(k+1<b){const v=Math.round(R[a][3]+(R[b][2]-R[a][3])*(tot?acc/tot:0.5));R[k+1][2]=v;R[k+1][3]=v;} }
+    }
+    if(R.some(q=>q[2]==null))continue;
+    const tr=trips[t],ro=routes[tr.r]||{s:'?',l:'',a:defAg};
+    R.forEach(q=>usedStops[q[1]]=stopsAll[q[1]]);
+    if(tr.sh)shapeIds.add(tr.sh);
+    outTrips.push({id:t,r:ro.s,ln:ro.l,h:tr.h,ag:ro.a,sv:tr.sv,sh:tr.sh,st:R.map(q=>q[1]),a:R.map(q=>q[2]),d:R.map(q=>q[3])});
+  }
+  const shapes={};
+  if(shapeIds.size){
+    progress('Leyendo trazados (shapes)…');
+    const tmp={};
+    await streamFile(u8,'shapes.txt',rowHandler((r,x)=>{const s=r[x.shape_id];if(!shapeIds.has(s))return;
+      (tmp[s]=tmp[s]||[]).push([+r[x.shape_pt_sequence],Math.round(+r[x.shape_pt_lat]*1e5)/1e5,Math.round(+r[x.shape_pt_lon]*1e5)/1e5]);}),yieldFn);
+    for(const s in tmp)shapes[s]=tmp[s].sort((a,b)=>a[0]-b[0]).map(p=>[p[1],p[2]]);
+  }
+  const keepSvc={},keepEx={};
+  outTrips.forEach(t=>{if(svc[t.sv])keepSvc[t.sv]=svc[t.sv];if(ex[t.sv])keepEx[t.sv]=ex[t.sv];});
+  progress('Listo: '+outTrips.length+' viajes, '+Object.keys(usedStops).length+' paradas, '+Object.keys(shapes).length+' trazados.');
+  return {label,built:Date.now(),stops:usedStops,trips:outTrips,svc:keepSvc,ex:keepEx,shapes};
+}
+
+function madridParts(date){
+  const f=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const o={};f.formatToParts(date).forEach(p=>o[p.type]=p.value);
+  const base=Date.UTC(+o.year,+o.month-1,+o.day);
+  const mk=ms=>{const d=new Date(ms);return{ymd:d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate(),dow:(d.getUTCDay()+6)%7};};
+  return{sec:(+o.hour%24)*3600+(+o.minute)*60+(+o.second),days:{'0':mk(base),'1':mk(base-864e5),'-1':mk(base+864e5)}};
+}
+function svcActive(ds,sv,ymd,dow){
+  const e=ds.ex[sv]&&ds.ex[sv][ymd];
+  if(e===1)return true;if(e===2)return false;
+  const c=ds.svc[sv];if(!c)return false;
+  return ymd>=c.s&&ymd<=c.e&&c.d[dow]===1;
+}
+function stopVerts(ds,tr){
+  if(tr._v!==undefined)return tr._v;
+  tr._v=null;
+  const sh=ds.shapes&&ds.shapes[tr.sh];if(!sh||sh.length<2)return null;
+  const v=[];let from=0;
+  for(const sid of tr.st){const s=ds.stops[sid];if(!s)return null;
+    let best=-1,bd=1e18;
+    for(let k=from;k<sh.length;k++){const dl=sh[k][0]-s[1],dn=(sh[k][1]-s[2])*0.73,d2=dl*dl+dn*dn;if(d2<bd){bd=d2;best=k;}}
+    if(best<0||Math.sqrt(bd)>0.01)return null;
+    v.push(best);from=best;}
+  tr._v=v;return v;
+}
+function along(ds,tr,i,f,s,s2){
+  const v=stopVerts(ds,tr);
+  if(v&&v[i+1]>v[i]){
+    const sub=ds.shapes[tr.sh].slice(v[i],v[i+1]+1);
+    const L=[0];for(let k=1;k<sub.length;k++)L.push(L[k-1]+hav(sub[k-1][0],sub[k-1][1],sub[k][0],sub[k][1]));
+    const tg=L[L.length-1]*f;let k=1;while(k<L.length-1&&L[k]<tg)k++;
+    const seg=L[k]-L[k-1],g=seg>0?(tg-L[k-1])/seg:0;
+    return{lat:sub[k-1][0]+(sub[k][0]-sub[k-1][0])*g,lon:sub[k-1][1]+(sub[k][1]-sub[k-1][1])*g,via:'shape'};
+  }
+  return{lat:s[1]+(s2[1]-s[1])*f,lon:s[2]+(s2[2]-s[2])*f,via:'line'};
+}
+function locate(ds,tr,t){
+  const n=tr.st.length;let i=0;
+  for(let j=0;j<n;j++){if(tr.a[j]<=t)i=j;else break;}
+  const s=ds.stops[tr.st[i]];if(!s)return null;
+  const prog=(t-tr.d[0])/Math.max(1,tr.a[n-1]-tr.d[0]);
+  if(t<=tr.d[i]||i===n-1)return{lat:s[1],lon:s[2],i,status:'stop',prog,via:'stop'};
+  const s2=ds.stops[tr.st[i+1]];if(!s2)return null;
+  const span=tr.a[i+1]-tr.d[i],f=span>0?Math.min(1,(t-tr.d[i])/span):0;
+  return Object.assign(along(ds,tr,i,f,s,s2),{i,status:'moving',prog});
+}
+function estimate(ds,date){
+  const mp=madridParts(date),out=[];
+  ds.trips.forEach(tr=>{const n=tr.st.length;
+    for(const off of [0,1]){
+      const t=mp.sec+off*86400;
+      if(t<tr.d[0]||t>tr.a[n-1])continue;
+      const dd=mp.days[off];
+      if(!svcActive(ds,tr.sv,dd.ymd,dd.dow))continue;
+      const p=locate(ds,tr,t);
+      if(p&&inAst(p.lat,p.lon))out.push(Object.assign({tr,off,t,key:(tr.r+'|'+tr.d[0]+'|'+tr.a[n-1]+'|'+off).toLowerCase()},p));
+    }});
+  return out;
+}
+function departures(ds,names,date,limit){
+  if(!ds._si){ds._si={};ds.trips.forEach((tr,ti)=>tr.st.forEach((sid,j)=>{if(j<tr.st.length-1)(ds._si[sid]=ds._si[sid]||[]).push([ti,j]);}));}
+  const mp=madridParts(date),out=[],set=new Set(names);
+  for(const sid in ds._si){ if(!set.has(norm(ds.stops[sid][0])))continue;
+    for(const [ti,j] of ds._si[sid]){const tr=ds.trips[ti];
+      for(const off of [1,0,-1]){
+        const t=mp.sec+off*86400,dep=tr.d[j];
+        if(dep<t||dep-t>86400)continue;
+        const dd=mp.days[off];
+        if(!svcActive(ds,tr.sv,dd.ymd,dd.dow))continue;
+        out.push({tr,dep,mins:Math.round((dep-t)/60),next:dep-t+mp.sec>=86400,stop:ds.stops[sid][0]});
+      }}}
+  return out.sort((a,b)=>a.mins-b.mins).slice(0,limit||30);
+}
+function norm(s){return (s||'').toLowerCase().trim();}
+/*ENDCORE*/
+</script>
+
+<script>
+// ============ UI ============
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let DS=[],markers=new Map(),buses=[],routeLayer=null,selKey=null;
+
+// --- IndexedDB ---
+const DB=()=>new Promise((res,rej)=>{const r=indexedDB.open('radar-alsa',1);r.onupgradeneeded=()=>r.result.createObjectStore('ds',{keyPath:'id'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+const dbAll=async()=>{const d=await DB();return new Promise(r=>{const q=d.transaction('ds').objectStore('ds').getAll();q.onsuccess=()=>r(q.result);q.onerror=()=>r([]);});};
+const dbPut=async o=>{const d=await DB();return new Promise((res,rej)=>{const t=d.transaction('ds','readwrite');t.objectStore('ds').put(o);t.oncomplete=res;t.onerror=()=>rej(t.error);});};
+const dbDel=async id=>{const d=await DB();return new Promise(res=>{const t=d.transaction('ds','readwrite');t.objectStore('ds').delete(id);t.oncomplete=res;});};
+
+// --- Mapa ---
+const map=L.map('map',{zoomControl:true}).setView([43.36,-5.85],9);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap · Horarios: NAP/MITMA'}).addTo(map);
+const layer=L.layerGroup().addTo(map);
+const color=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))%360;return `hsl(${h},85%,62%)`;};
+
+// --- Pestañas ---
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.t));});
+const gotoTab=t=>document.querySelector(`.tabs button[data-t=${t}]`).click();
+
+// --- Log ---
+const log=m=>{const l=$('#log');l.textContent+=m+'\n';l.scrollTop=l.scrollHeight;};
+const yieldUI=()=>new Promise(r=>setTimeout(r,0));
+
+async function ingest(u8,label,id){
+  log('▶ '+label+' ('+(u8.length/1048576).toFixed(1)+' MB)');
+  try{
+    const ds=await processGTFS(u8,label,log,yieldUI);
+    ds.id=id;await dbPut(ds);log('✔ Guardado en el navegador.');
+    await reload();gotoTab('bus');
+  }catch(e){log('✖ '+e.message);$('#log').classList.add('err');console.error(e);}
+}
+$('#zip').onchange=async e=>{
+  for(const f of e.target.files){
+    const m=f.name.match(/(\d{4})/);const id=m?m[1]:f.name;
+    await ingest(new Uint8Array(await f.arrayBuffer()),f.name,id);
+  }
+  e.target.value='';
+};
+document.querySelectorAll('[data-dl]').forEach(b=>b.onclick=async()=>{
+  const id=b.dataset.dl,key=$('#key').value.trim();
+  if(!key){log('Introduce tu clave API del NAP.');return;}
+  if($('#rem').checked)try{localStorage.setItem('nap_key',key);}catch(_){}
+  log('Descargando fichero '+id+' del NAP…');
+  try{
+    const r=await fetch('https://nap.transportes.gob.es/api/Fichero/download/'+id,{headers:{ApiKey:key}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    await ingest(new Uint8Array(await r.arrayBuffer()),'NAP '+id,id);
+  }catch(e){log('✖ Descarga directa no disponible ('+e.message+'). Descarga el ZIP desde el NAP y cárgalo con el selector de archivos.');}
+});
+try{const k=localStorage.getItem('nap_key');if(k){$('#key').value=k;$('#rem').checked=true;}}catch(_){}
+
+async function reload(){
+  DS=await dbAll();
+  const now=madridParts(new Date()),today=now.days['0'].ymd;
+  $('#ds').innerHTML=DS.length?DS.map(d=>{
+    const end=Math.max(0,...Object.values(d.svc).map(s=>s.e));
+    const old=end&&end<today;
+    return `<div class="row" style="cursor:default"><div class="t"><div>${esc(d.label)}</div><small>${d.trips.length} viajes · cargado ${new Date(d.built).toLocaleDateString('es-ES')}${end?' · válido hasta '+String(end).replace(/(\d{4})(\d\d)(\d\d)/,'$3/$2/$1'):''}${old?' <b class="err">CADUCADO</b>':''}</small></div><button class="btn sm" data-del="${d.id}">Quitar</button></div>`;}).join(''):'<small>Sin datos todavía. Carga los horarios del NAP.</small>';
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{await dbDel(b.dataset.del);await reload();});
+  const names=new Set();
+  DS.forEach(d=>Object.values(d.stops).forEach(s=>{if(inAst(s[1],s[2]))names.add(s[0]);}));
+  $('#sl').innerHTML=[...names].sort().map(n=>`<option value="${esc(n)}">`).join('');
+  tick();
+  if(!DS.length)gotoTab('dat');
+}
+
+function popup(b,ds){
+  const tr=b.tr,S=j=>ds.stops[tr.st[j]],n=tr.st.length;
+  const cur=S(b.i),nx=b.status==='moving'?S(b.i+1):null;
+  const via={stop:'en parada',shape:'sobre el trazado del GTFS',line:'en línea recta entre paradas (sin trazado)'}[b.via];
+  return `<div class="pp"><h3>Línea ${esc(tr.r)} → ${esc(tr.h||S(n-1)[0])}</h3><span class="est">POSICIÓN ESTIMADA POR HORARIO</span>
+  <table>
+  <tr><td>Operador</td><td>${esc(tr.ag)}</td></tr>
+  <tr><td>Ruta</td><td>${esc(tr.ln)}</td></tr>
+  <tr><td>Estado</td><td>${b.status==='stop'?'En parada: '+esc(cur[0]):'En ruta tras '+esc(cur[0])+' (sal. '+fmt(tr.d[b.i])+')'}</td></tr>
+  ${nx?`<tr><td>Próxima</td><td>${esc(nx[0])} (${fmt(tr.a[b.i+1])})</td></tr>`:''}
+  <tr><td>Origen</td><td>${esc(S(0)[0])} (${fmt(tr.d[0])})</td></tr>
+  <tr><td>Destino</td><td>${esc(S(n-1)[0])} (${fmt(tr.a[n-1])})</td></tr>
+  <tr><td>Coord.</td><td>${b.lat.toFixed(5)}, ${b.lon.toFixed(5)} · ${via}</td></tr>
+  <tr><td>Retraso</td><td>No disponible (sin tiempo real)</td></tr></table>
+  <div class="bar"><i style="width:${Math.round(b.prog*100)}%"></i></div></div>`;
+}
+function showRoute(b,ds){
+  if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}
+  const tr=b.tr,pts=(ds.shapes&&ds.shapes[tr.sh]&&ds.shapes[tr.sh].length>1)?ds.shapes[tr.sh]:tr.st.map(s=>[ds.stops[s][1],ds.stops[s][2]]);
+  routeLayer=L.layerGroup([L.polyline(pts,{color:color(tr.r),weight:3,opacity:.8}),
+    ...tr.st.map((s,j)=>L.circleMarker([ds.stops[s][1],ds.stops[s][2]],{radius:3,color:'#fff',weight:1,fillColor:j<=b.i?'#777':color(tr.r),fillOpacity:1}).bindTooltip(ds.stops[s][0]+' · '+fmt(tr.a[j])))]).addTo(map);
+}
+map.on('popupclose',()=>{if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}});
+
+function tick(){
+  const date=new Date();let all=[];
+  DS.forEach(ds=>{
+    const anyAlsa=ds.trips.some(t=>/alsa/i.test(t.ag));
+    const alsaOnly=!$('#fOth').checked&&anyAlsa;
+    estimate(ds,date).forEach(b=>{if(alsaOnly&&!/alsa/i.test(b.tr.ag))return;b.ds=ds;all.push(b);});
+  });
+  const seen=new Set();all=all.filter(b=>{if(seen.has(b.key))return false;seen.add(b.key);return true;});
+  const q=norm($('#fq').value);
+  if(q)all=all.filter(b=>norm(b.tr.r+' '+b.tr.h+' '+b.tr.ln+' '+b.ds.stops[b.tr.st[b.i]][0]).includes(q));
+  buses=all;
+  // marcadores
+  const keys=new Set(all.map(b=>b.key));
+  markers.forEach((m,k)=>{if(!keys.has(k)){layer.removeLayer(m);markers.delete(k);}});
+  all.forEach(b=>{
+    let m=markers.get(b.key);
+    const html=`<div class="b" style="background:${color(b.tr.r)}">${esc(b.tr.r)}</div>`;
+    if(!m){m=L.marker([b.lat,b.lon],{icon:L.divIcon({className:'bus',html,iconSize:[36,20],iconAnchor:[18,10]})}).addTo(layer);
+      m.on('click',()=>showRoute(m._b,m._b.ds));markers.set(b.key,m);}
+    m._b=b;m.setLatLng([b.lat,b.lon]);m.bindPopup(()=>popup(m._b,m._b.ds));
+  });
+  $('#sN').textContent=all.length;
+  $('#sL').textContent=new Set(all.map(b=>b.tr.r)).size;
+  $('#sT').textContent=date.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Madrid'});
+  $('#list').innerHTML=all.sort((a,b)=>a.tr.r.localeCompare(b.tr.r,'es',{numeric:true})).slice(0,300).map(b=>`<div class="row" data-k="${esc(b.key)}"><span class="chip" style="background:${color(b.tr.r)}">${esc(b.tr.r)}</span><div class="t"><div>${esc(b.tr.h||b.ds.stops[b.tr.st[b.tr.st.length-1]][0])}</div><small>${b.status==='stop'?'En parada':'Tras'} ${esc(b.ds.stops[b.tr.st[b.i]][0])} · llega ${fmt(b.tr.a[b.tr.st.length-1])}</small></div></div>`).join('')||'<small>No hay autobuses en servicio ahora según el horario'+(DS.length?'':' (carga los datos en la pestaña Datos)')+'.</small>';
+  document.querySelectorAll('#list .row').forEach(r=>r.onclick=()=>{const m=markers.get(r.dataset.k);if(m){map.flyTo(m.getLatLng(),13);m.openPopup();showRoute(m._b,m._b.ds);}});
+}
+$('#fq').oninput=tick;$('#fOth').onchange=tick;
+
+// --- Paradas ---
+$('#sq').oninput=()=>{
+  const v=norm($('#sq').value);const box=$('#dep');
+  if(!v){box.innerHTML='';return;}
+  let rows=[];
+  DS.forEach(ds=>{
+    const ids=new Set();Object.values(ds.stops).forEach(s=>{if(norm(s[0])===v)ids.add(v);});
+    if(ids.size)rows=rows.concat(departures(ds,[v],new Date(),30).map(d=>Object.assign(d,{ds})));
+  });
+  const seen=new Set();rows=rows.filter(d=>{const k=(d.tr.r+d.dep+d.tr.h).toLowerCase();if(seen.has(k))return false;seen.add(k);return true;}).sort((a,b)=>a.mins-b.mins).slice(0,30);
+  box.innerHTML=rows.length?`<table class="dep">${rows.map(d=>`<tr><td><span class="chip" style="background:${color(d.tr.r)}">${esc(d.tr.r)}</span></td><td>${esc(d.tr.h||d.ds.stops[d.tr.st[d.tr.st.length-1]][0])}<br><small style="color:var(--mu)">${esc(d.tr.ag)}</small></td><td style="text-align:right"><b>${fmt(d.dep)}</b>${d.next?' <small>(mañana)</small>':''}<br><small style="color:var(--mu)">${d.mins<60?'en '+d.mins+' min':'en '+Math.floor(d.mins/60)+' h '+d.mins%60+' min'}</small></td></tr>`).join('')}</table><div class="foot">Salidas programadas, sin tiempo real.</div>`:'<small>Sin salidas próximas para esa parada (escribe el nombre exacto de la lista).</small>';
+};
+
+reload();
+setInterval(tick,15000);
+</script>
+</body>
+</html>
